@@ -1,0 +1,1 @@
+// Categoria Equipo Repository Interface

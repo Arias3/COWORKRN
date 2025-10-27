@@ -1,0 +1,1 @@
+// Categorias Equipos Screen

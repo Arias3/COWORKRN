@@ -1,0 +1,1 @@
+// Equipo Actividad Repository Interface
