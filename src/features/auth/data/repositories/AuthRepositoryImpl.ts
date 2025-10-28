@@ -25,4 +25,8 @@ export class AuthRepositoryImpl implements AuthRepository {
    // return this.dataSource.getCurrentUser();
     return null;
   }
+
+  async validate(email: string, validationCode: string): Promise<boolean> {
+    return this.dataSource.validate(email, validationCode);
+  }
 }

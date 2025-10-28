@@ -5,6 +5,7 @@ export const TOKENS = {
   SignupUC: Symbol("SignupUC"),
   LogoutUC: Symbol("LogoutUC"),
   GetCurrentUserUC: Symbol("GetCurrentUserUC"),
+  // VerifyEmailUC removed — not used
   ProductRemoteDS: Symbol("ProductRemoteDS"),
   ProductRepo: Symbol("ProductRepo"),
   AddProductUC: Symbol("AddProductUC"),

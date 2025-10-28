@@ -2,19 +2,24 @@ import { FontAwesome6 } from "@react-native-vector-icons/fontawesome6";
 import { createBottomTabNavigator } from "@react-navigation/bottom-tabs";
 import { createStackNavigator } from "@react-navigation/stack";
 import React from "react";
+import { Text, View } from "react-native";
 import { IconButton } from "react-native-paper";
 
 import { useAuth } from "./features/auth/presentation/context/authContext";
 import LoginScreen from "./features/auth/presentation/screens/LoginScreen";
 import SignupScreen from "./features/auth/presentation/screens/SignupScreen";
-import AddProductScreen from "./features/products/presentation/screens/AddProductScreen";
-import ProductListScreen from "./features/products/presentation/screens/ProductListScreen";
-import UpdateProductScreen from "./features/products/presentation/screens/UpdateProductScreen";
 import SettingScreen from "./features/settings/SettingScreen";
-
 
 const Stack = createStackNavigator();
 const Tab = createBottomTabNavigator();
+
+function HomeScreen() {
+  return (
+    <View style={{ flex: 1, alignItems: "center", justifyContent: "center" }}>
+      <Text style={{ fontSize: 20 }}>Home</Text>
+    </View>
+  );
+}
 
 export default function AuthFlow() {
   const { isLoggedIn, logout } = useAuth();
@@ -34,16 +39,14 @@ export default function AuthFlow() {
             shadowOpacity: 0, // Remove shadow on iOS
           },
         }}
-
       >
         <Tab.Screen
           name="Home"
-          component={ProductListScreen}
+          component={HomeScreen}
           options={{
-
             tabBarIcon: ({ color }) => (
               <FontAwesome6 name="house" size={24} color={color} iconStyle="solid" />
-            )
+            ),
           }}
         />
         <Tab.Screen
@@ -52,7 +55,7 @@ export default function AuthFlow() {
           options={{
             tabBarIcon: ({ color }) => (
               <FontAwesome6 name="user" size={24} color={color} />
-            )
+            ),
           }}
         />
       </Tab.Navigator>
@@ -64,24 +67,6 @@ export default function AuthFlow() {
       {isLoggedIn ? (
         <>
           <Stack.Screen name="App" component={ContentTabs} />
-          <Stack.Screen
-            name="AddProductScreen"
-            component={AddProductScreen}
-            options={{
-              title: "Add Product",
-              headerShown: true,
-              presentation: 'modal' // Optional: makes it slide up from bottom
-            }}
-          />
-          <Stack.Screen
-            name="UpdateProductScreen"
-            component={UpdateProductScreen}
-            options={{
-              title: "Update Product",
-              headerShown: true,
-              presentation: 'modal' // Optional: makes it slide up from bottom
-            }}
-          />
         </>
       ) : (
         <>
