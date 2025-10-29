@@ -11,8 +11,11 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
+import RobleApiDataSource from '../../../../core/data/datasources/RobleApiDataSource';
+import { useAuth } from '../../../auth/presentation/context/authContext';
 import CursoDomain from '../../../home/domain/entities/CursoEntity';
+import { CategoriaEquipoRepositoryRobleImpl } from '../../data/repositories/CategoriaEquipoRepositoryRobleImpl';
+import { EquipoRepositoryRobleImpl } from '../../data/repositories/EquipoRepositoryRobleImpl';
 import { CategoriaEquipo } from '../../domain/entities/CategoriaEquipoEntity';
 import { Equipo } from '../../domain/entities/EquipoEntity';
 import { TipoAsignacion } from '../../domain/entities/TipoAsignacion';
@@ -26,12 +29,10 @@ const CategoriasEquiposScreen = () => {
   const navigation = useNavigation();
   const route = useRoute();
   const params = route.params as RouteParams;
+  const { controller: authController } = useAuth();
 
-  const [controller] = useState<CategoriaEquipoController>(() =>
-    DependencyInjection.resolve<CategoriaEquipoController>(
-      'CategoriaEquipoController'
-    )
-  );
+  const [controller, setController] = useState<CategoriaEquipoController | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   const [categorias, setCategorias] = useState<CategoriaEquipo[]>([]);
   const [equipos, setEquipos] = useState<Equipo[]>([]);
@@ -41,21 +42,74 @@ const CategoriasEquiposScreen = () => {
   const [isLoading, setIsLoading] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
 
-  const esProfesor = controller.esProfesorDelCursoActual;
+  const esProfesor = controller?.esProfesorDelCursoActual ?? false;
+
+  // Initialize controller
+  useEffect(() => {
+    const initializeController = async () => {
+      try {
+        console.log('🔧 Initializing CategoriasEquiposScreen controller...');
+
+        if (!authController) {
+          console.error('❌ AuthController not available');
+          return;
+        }
+
+        const currentUserId = authController.currentUser?.id;
+        if (!currentUserId) {
+          console.error('❌ Current user ID not available');
+          Alert.alert('Error', 'No se pudo obtener la información del usuario');
+          return;
+        }
+
+        // Create datasource
+        const dataSource = new RobleApiDataSource();
+
+        // Create repositories
+        const categoriaRepository = new CategoriaEquipoRepositoryRobleImpl(dataSource);
+        const equipoRepository = new EquipoRepositoryRobleImpl(dataSource);
+
+        // Create controller
+        const ctrl = new CategoriaEquipoController(
+          categoriaRepository,
+          equipoRepository,
+          currentUserId
+        );
+
+        setController(ctrl);
+
+        console.log('✅ Controller initialized successfully');
+      } catch (error) {
+        console.error('❌ Error initializing controller:', error);
+        Alert.alert('Error', 'No se pudo inicializar el controlador');
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    initializeController();
+  }, [authController]);
 
   useEffect(() => {
-    loadData();
+    if (!isInitializing && controller) {
+      loadData();
 
-    const unsubscribe = controller.subscribe(() => {
-      setCategorias([...controller.categorias]);
-      setEquipos([...controller.equipos]);
-      setIsLoading(controller.isLoading);
-    });
+      const unsubscribe = controller.subscribe(() => {
+        setCategorias([...controller.categorias]);
+        setEquipos([...controller.equipos]);
+        setIsLoading(controller.isLoading);
+      });
 
-    return () => unsubscribe();
-  }, []);
+      return () => unsubscribe();
+    }
+  }, [isInitializing, controller]);
 
   const loadData = async () => {
+    if (!controller) {
+      console.warn('⚠️ Controller not initialized yet');
+      return;
+    }
+
     try {
       await controller.loadCategoriasPorCurso(params.curso);
     } catch (e) {
@@ -64,6 +118,7 @@ const CategoriasEquiposScreen = () => {
   };
 
   const handleRefresh = async () => {
+    if (!controller) return;
     setRefreshing(true);
     await controller.refreshData();
     setRefreshing(false);
@@ -76,12 +131,14 @@ const CategoriasEquiposScreen = () => {
   };
 
   const handleSelectCategoria = async (categoria: CategoriaEquipo) => {
+    if (!controller) return;
     setSelectedCategoria(categoria);
     controller.selectCategoria(categoria);
     await controller.loadEquiposPorCategoria(categoria.id!);
   };
 
   const handleCreateCategoria = () => {
+    if (!controller) return;
     Alert.prompt(
       'Nueva Categoría',
       'Ingrese el nombre de la categoría',
@@ -110,6 +167,7 @@ const CategoriasEquiposScreen = () => {
   };
 
   const handleDeleteCategoria = (categoria: CategoriaEquipo) => {
+    if (!controller) return;
     Alert.alert(
       'Eliminar Categoría',
       `¿Estás seguro de que deseas eliminar "${categoria.nombre}"?`,
@@ -119,6 +177,7 @@ const CategoriasEquiposScreen = () => {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
+            if (!controller) return;
             if (categoria.id) {
               await controller.deleteCategoria(
                 categoria.id,
@@ -137,6 +196,7 @@ const CategoriasEquiposScreen = () => {
   };
 
   const handleCreateEquipo = () => {
+    if (!controller) return;
     if (!selectedCategoria) {
       Alert.alert('Error', 'Selecciona una categoría primero');
       return;
@@ -150,6 +210,7 @@ const CategoriasEquiposScreen = () => {
         {
           text: 'Crear',
           onPress: async (nombre?: string) => {
+            if (!controller) return;
             if (nombre && nombre.trim().length > 0) {
               await controller.createEquipo(
                 nombre.trim(),
@@ -169,6 +230,7 @@ const CategoriasEquiposScreen = () => {
   };
 
   const handleDeleteEquipo = (equipo: Equipo) => {
+    if (!controller) return;
     Alert.alert(
       'Eliminar Equipo',
       `¿Estás seguro de que deseas eliminar "${equipo.nombre}"?`,
@@ -178,6 +240,7 @@ const CategoriasEquiposScreen = () => {
           text: 'Eliminar',
           style: 'destructive',
           onPress: async () => {
+            if (!controller) return;
             if (equipo.id) {
               await controller.deleteEquipo(
                 equipo.id,
@@ -240,6 +303,7 @@ const CategoriasEquiposScreen = () => {
           <TouchableOpacity
             style={[styles.button, { backgroundColor: color }]}
             onPress={() => {
+              if (!controller) return;
               controller.selectCategoria(item);
               Alert.alert(
                 'Próximamente',
@@ -426,91 +490,100 @@ const CategoriasEquiposScreen = () => {
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity
-          onPress={() => navigation.goBack()}
-          style={styles.backButton}
-        >
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerTextContainer}>
-          <Text style={styles.headerTitle}>Gestión del Curso</Text>
-          <Text style={styles.headerSubtitle}>{params.curso.nombre}</Text>
+      {isInitializing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#673AB7" />
+          <Text style={styles.loadingText}>Inicializando...</Text>
         </View>
-        <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-          <Text style={styles.refreshIcon}>🔄</Text>
-        </TouchableOpacity>
-      </View>
-
-      {esProfesor ? (
+      ) : (
         <>
-          {/* Tab Bar */}
-          <View style={styles.tabBar}>
+          {/* Header */}
+          <View style={styles.header}>
             <TouchableOpacity
-              style={[styles.tab, selectedTab === 0 && styles.tabActive]}
-              onPress={() => setSelectedTab(0)}
+              onPress={() => navigation.goBack()}
+              style={styles.backButton}
             >
-              <Text style={styles.tabIcon}>📂</Text>
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === 0 && styles.tabTextActive,
-                ]}
-              >
-                Categorías
-              </Text>
+              <Text style={styles.backIcon}>←</Text>
             </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, selectedTab === 1 && styles.tabActive]}
-              onPress={() => setSelectedTab(1)}
-            >
-              <Text style={styles.tabIcon}>👥</Text>
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === 1 && styles.tabTextActive,
-                ]}
-              >
-                Equipos
-              </Text>
-            </TouchableOpacity>
-            <TouchableOpacity
-              style={[styles.tab, selectedTab === 2 && styles.tabActive]}
-              onPress={() => setSelectedTab(2)}
-            >
-              <Text style={styles.tabIcon}>📊</Text>
-              <Text
-                style={[
-                  styles.tabText,
-                  selectedTab === 2 && styles.tabTextActive,
-                ]}
-              >
-                Evaluaciones
-              </Text>
+            <View style={styles.headerTextContainer}>
+              <Text style={styles.headerTitle}>Gestión del Curso</Text>
+              <Text style={styles.headerSubtitle}>{params.curso.nombre}</Text>
+            </View>
+            <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
+              <Text style={styles.refreshIcon}>🔄</Text>
             </TouchableOpacity>
           </View>
 
-          {/* Tab Content */}
-          {selectedTab === 0 && renderCategoriasTab()}
-          {selectedTab === 1 && renderEquiposTab()}
-          {selectedTab === 2 && renderEvaluacionesTab()}
+          {esProfesor ? (
+            <>
+              {/* Tab Bar */}
+              <View style={styles.tabBar}>
+                <TouchableOpacity
+                  style={[styles.tab, selectedTab === 0 && styles.tabActive]}
+                  onPress={() => setSelectedTab(0)}
+                >
+                  <Text style={styles.tabIcon}>📂</Text>
+                  <Text
+                    style={[
+                      styles.tabText,
+                      selectedTab === 0 && styles.tabTextActive,
+                    ]}
+                  >
+                    Categorías
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, selectedTab === 1 && styles.tabActive]}
+                  onPress={() => setSelectedTab(1)}
+                >
+                  <Text style={styles.tabIcon}>👥</Text>
+                  <Text
+                    style={[
+                      styles.tabText,
+                      selectedTab === 1 && styles.tabTextActive,
+                    ]}
+                  >
+                    Equipos
+                  </Text>
+                </TouchableOpacity>
+                <TouchableOpacity
+                  style={[styles.tab, selectedTab === 2 && styles.tabActive]}
+                  onPress={() => setSelectedTab(2)}
+                >
+                  <Text style={styles.tabIcon}>📊</Text>
+                  <Text
+                    style={[
+                      styles.tabText,
+                      selectedTab === 2 && styles.tabTextActive,
+                    ]}
+                  >
+                    Evaluaciones
+                  </Text>
+                </TouchableOpacity>
+              </View>
 
-          {/* FAB */}
-          {selectedTab === 0 && esProfesor && (
-            <TouchableOpacity style={styles.fab} onPress={handleCreateCategoria}>
-              <Text style={styles.fabIcon}>➕</Text>
-            </TouchableOpacity>
-          )}
-          {selectedTab === 1 && esProfesor && selectedCategoria && (
-            <TouchableOpacity style={styles.fab} onPress={handleCreateEquipo}>
-              <Text style={styles.fabIcon}>➕</Text>
-            </TouchableOpacity>
+              {/* Tab Content */}
+              {selectedTab === 0 && renderCategoriasTab()}
+              {selectedTab === 1 && renderEquiposTab()}
+              {selectedTab === 2 && renderEvaluacionesTab()}
+
+              {/* FAB */}
+              {selectedTab === 0 && esProfesor && (
+                <TouchableOpacity style={styles.fab} onPress={handleCreateCategoria}>
+                  <Text style={styles.fabIcon}>➕</Text>
+                </TouchableOpacity>
+              )}
+              {selectedTab === 1 && esProfesor && selectedCategoria && (
+                <TouchableOpacity style={styles.fab} onPress={handleCreateEquipo}>
+                  <Text style={styles.fabIcon}>➕</Text>
+                </TouchableOpacity>
+              )}
+            </>
+          ) : (
+            // Vista estudiante
+            renderCategoriasTab()
           )}
         </>
-      ) : (
-        // Vista estudiante
-        renderCategoriasTab()
       )}
     </View>
   );
@@ -520,6 +593,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F9FAFB',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F9FAFB',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#757575',
   },
   header: {
     flexDirection: 'row',
@@ -592,11 +676,6 @@ const styles = StyleSheet.create({
   },
   tabContainer: {
     flex: 1,
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
   },
   emptyContainer: {
     flex: 1,

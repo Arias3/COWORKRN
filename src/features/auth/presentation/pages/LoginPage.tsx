@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -14,9 +14,7 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
-import { RobleAuthLoginUseCase } from '../../domain/usecases/RobleAuthLoginUseCase';
-import { RobleAuthLoginController } from '../controllers/RobleAuthLoginController';
+import { useAuth } from '../context/authContext';
 
 type RootStackParamList = {
     Login: undefined;
@@ -34,46 +32,13 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
  */
 export const LoginPage: React.FC = () => {
     const navigation = useNavigation<NavigationProp>();
+    const { login, isLoading, error } = useAuth();
 
     // State
     const [email, setEmail] = useState('');
     const [password, setPassword] = useState('');
     const [hidePassword, setHidePassword] = useState(true);
     const [rememberMe, setRememberMe] = useState(false);
-    const [isLoading, setIsLoading] = useState(false);
-
-    // Controller
-    const [controller] = useState(() => {
-        const useCase = DependencyInjection.resolve<RobleAuthLoginUseCase>('RobleAuthLoginUseCase');
-        return new RobleAuthLoginController(useCase);
-    });
-
-    // Subscribe to controller changes
-    useEffect(() => {
-        const unsubscribe = controller.subscribe(() => {
-            setIsLoading(controller.isLoading);
-        });
-
-        // Load saved credentials
-        loadSavedCredentials();
-
-        // Initialize controller
-        controller.init();
-
-        return () => {
-            unsubscribe();
-            controller.dispose();
-        };
-    }, []);
-
-    const loadSavedCredentials = async () => {
-        const credentials = await controller.getSavedCredentials();
-        if (credentials.email) {
-            setEmail(credentials.email);
-            setPassword(credentials.password);
-            setRememberMe(true);
-        }
-    };
 
     const handleLogin = async () => {
         const trimmedEmail = email.trim();
@@ -88,22 +53,16 @@ export const LoginPage: React.FC = () => {
             return;
         }
 
-        const success = await controller.login({
-            email: trimmedEmail,
-            password: trimmedPassword,
-            rememberMe: rememberMe,
-        });
-
-        if (success) {
-            console.log('✅ Login exitoso');
-            navigation.reset({
-                index: 0,
-                routes: [{ name: 'Home' }],
-            });
-        } else {
+        try {
+            const success = await login(trimmedEmail, trimmedPassword, rememberMe);
+            if (success) {
+                console.log('✅ Login exitoso - AuthFlow manejará la navegación automáticamente');
+                // No need to navigate manually - AuthFlow will switch to authenticated screens
+            }
+        } catch (err) {
             Alert.alert(
-                'Error de Acceso',
-                'Credenciales incorrectas. Verifica tu email y contraseña.',
+                'Error de Autenticación',
+                error || 'No se pudo iniciar sesión. Verifica tus credenciales.',
                 [{ text: 'OK' }]
             );
         }

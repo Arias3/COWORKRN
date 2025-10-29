@@ -1,5 +1,5 @@
 import { Usuario } from '../../../auth/domain/entities/UserEntity';
-import { UsuarioUseCase } from '../../../auth/domain/usecases/UsuarioUseCase';
+import { UsuarioUseCase } from '../../../auth/domain/use_case/UsuarioUseCase';
 import { RobleAuthLoginController } from '../../../auth/presentation/controllers/RobleAuthLoginController';
 import CursoDomain from '../../domain/entities/CursoEntity';
 import CursoUseCase from '../../domain/usecases/CursoUseCase';

@@ -1,5 +1,5 @@
 import { Usuario } from '../../../auth/domain/entities/UserEntity';
-import { UsuarioUseCase } from '../../../auth/domain/usecases/UsuarioUseCase';
+import { UsuarioUseCase } from '../../../auth/domain/use_case/UsuarioUseCase';
 import { RobleAuthLoginController } from '../../../auth/presentation/controllers/RobleAuthLoginController';
 import CursoUseCase from '../../domain/usecases/CursoUseCase';
 
@@ -266,7 +266,10 @@ export class NewCourseController {
     public generarCodigoAleatorio(): string {
         const timestamp = Date.now().toString().substring(7);
         const randomPart = Math.floor(Math.random() * 1000).toString().padStart(3, '0');
-        return `CURSO${timestamp}${randomPart}`;
+        const codigo = `CURSO${timestamp}${randomPart}`;
+        this.codigoRegistro = codigo;
+        this.notifyListeners();
+        return codigo;
     }
 }
 

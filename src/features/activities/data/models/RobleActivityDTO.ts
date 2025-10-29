@@ -46,12 +46,12 @@ export class RobleActivityDTO {
         try {
             const dto = new RobleActivityDTO({
                 id: json._id?.toString() ?? json.id?.toString(),
-                categoriaId: typeof json.categoria_id === 'string'
-                    ? parseInt(json.categoria_id, 10) || 0
-                    : json.categoria_id ?? 0,
-                nombre: json.nombre?.toString() ?? '',
-                descripcion: json.descripcion?.toString() ?? '',
-                fechaEntrega: json.fecha_entrega?.toString() ?? new Date().toISOString(),
+                categoriaId: typeof json.category_id === 'string'
+                    ? parseInt(json.category_id, 10) || 0
+                    : json.category_id ?? 0,
+                nombre: json.name?.toString() ?? '',
+                descripcion: json.description?.toString() ?? '',
+                fechaEntrega: json.delivery_date?.toString() ?? new Date().toISOString(),
                 creadoEn: json.creado_en?.toString(),
                 archivoAdjunto: json.archivo_adjunto?.toString() ?? '',
                 activo: json.activo === true || json.activo === 'true',
@@ -124,10 +124,10 @@ export class RobleActivityDTO {
      */
     toJson(): Record<string, any> {
         const json: Record<string, any> = {
-            categoria_id: this.categoriaId,
-            nombre: this.nombre,
-            descripcion: this.descripcion,
-            fecha_entrega: this.fechaEntrega,
+            category_id: this.categoriaId,
+            name: this.nombre,
+            description: this.descripcion,
+            delivery_date: this.fechaEntrega,
             creado_en: this.creadoEn ?? new Date().toISOString(),
             archivo_adjunto: this.archivoAdjunto,
             activo: this.activo,

@@ -12,7 +12,7 @@ import { RobleActivityDTO } from '../models/RobleActivityDTO';
 
 export class ActivityRepositoryRobleImpl implements IActivityRepository {
     private dataSource: RobleApiDataSource;
-    private static readonly tableName = 'actividades';
+    private static readonly tableName = 'activities';
 
     // ID mapping for consistency
     private static localToRoble: Map<number, string> = new Map();

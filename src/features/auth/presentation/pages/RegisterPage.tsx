@@ -1,6 +1,6 @@
 import { useNavigation } from '@react-navigation/native';
 import type { NativeStackNavigationProp } from '@react-navigation/native-stack';
-import React, { useEffect, useState } from 'react';
+import React, { useState } from 'react';
 import {
     ActivityIndicator,
     Alert,
@@ -14,9 +14,13 @@ import {
     TouchableOpacity,
     View,
 } from 'react-native';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
-import { RobleAuthLoginUseCase } from '../../domain/usecases/RobleAuthLoginUseCase';
-import { RobleAuthRegisterUseCase } from '../../domain/usecases/RobleAuthRegisterUseCase';
+import RobleAuthLoginDataSource from '../../data/datasources/RobleAuthLoginDataSource';
+import RobleAuthRegisterDataSource from '../../data/datasources/RobleAuthRegisterDataSource';
+import { RobleAuthLoginRepositoryImpl } from '../../data/repositories/RobleAuthLoginRepositoryImpl';
+import { RobleAuthRepositoryImpl } from '../../data/repositories/RobleAuthRepositoryImpl';
+import { RobleAuthLoginUseCase } from '../../domain/use_case/RobleAuthLoginUseCase';
+import { RobleAuthRegisterUseCase } from '../../domain/use_case/RobleAuthRegisterUseCase';
+import { useAuth } from '../context/authContext';
 import { RobleAuthLoginController } from '../controllers/RobleAuthLoginController';
 import { RobleAuthRegisterController } from '../controllers/RobleAuthRegisterController';
 
@@ -36,6 +40,7 @@ type NavigationProp = NativeStackNavigationProp<RootStackParamList>;
  */
 export const RegisterPage: React.FC = () => {
     const navigation = useNavigation<NavigationProp>();
+    const { login } = useAuth();
 
     // State
     const [nombre, setNombre] = useState('');
@@ -47,25 +52,20 @@ export const RegisterPage: React.FC = () => {
 
     // Controllers
     const [registerController] = useState(() => {
-        const useCase = DependencyInjection.resolve<RobleAuthRegisterUseCase>('RobleAuthRegisterUseCase');
+        const datasource = new RobleAuthRegisterDataSource();
+        const repository = new RobleAuthRepositoryImpl(datasource);
+        const useCase = new RobleAuthRegisterUseCase(repository);
         return new RobleAuthRegisterController(useCase);
     });
 
     const [loginController] = useState(() => {
-        const useCase = DependencyInjection.resolve<RobleAuthLoginUseCase>('RobleAuthLoginUseCase');
-        return new RobleAuthLoginController(useCase);
+        const datasource = new RobleAuthLoginDataSource();
+        const repository = new RobleAuthLoginRepositoryImpl(datasource);
+        const useCase = new RobleAuthLoginUseCase(repository);
+        const ctrl = new RobleAuthLoginController(useCase);
+        ctrl.init();
+        return ctrl;
     });
-
-    // Subscribe to controller changes
-    useEffect(() => {
-        const unsubscribe = registerController.subscribe(() => {
-            setIsLoading(registerController.isLoading);
-        });
-
-        return () => {
-            unsubscribe();
-        };
-    }, []);
 
     const handleRegister = async () => {
         // Validaciones
@@ -90,38 +90,46 @@ export const RegisterPage: React.FC = () => {
             return;
         }
 
-        const success = await registerController.register({
-            name: nombre.trim(),
-            email: email.trim(),
-            password: trimmedPassword,
-            loginController: loginController,
-        });
+        setIsLoading(true);
 
-        if (success) {
-            Alert.alert(
-                'Éxito',
-                'Cuenta creada exitosamente en Roble. Ahora puedes iniciar sesión',
-                [
-                    {
-                        text: 'OK',
-                        onPress: () => {
-                            // Clear form
-                            setNombre('');
-                            setEmail('');
-                            setPassword('');
-                            setRol('estudiante');
+        try {
+            const success = await registerController.register({
+                name: nombre.trim(),
+                email: email.trim(),
+                password: trimmedPassword,
+                loginController: loginController,
+            });
 
-                            // Navigate to login
-                            navigation.reset({
-                                index: 0,
-                                routes: [{ name: 'Login' }],
-                            });
+            if (success) {
+                Alert.alert(
+                    'Éxito',
+                    'Cuenta creada exitosamente en Roble. Ahora puedes iniciar sesión',
+                    [
+                        {
+                            text: 'OK',
+                            onPress: () => {
+                                // Clear form
+                                setNombre('');
+                                setEmail('');
+                                setPassword('');
+                                setRol('estudiante');
+
+                                // Navigate to login
+                                navigation.reset({
+                                    index: 0,
+                                    routes: [{ name: 'Login' }],
+                                });
+                            },
                         },
-                    },
-                ]
-            );
-        } else {
-            Alert.alert('Error', registerController.errorMessage || 'Error al registrar');
+                    ]
+                );
+            } else {
+                Alert.alert('Error', registerController.errorMessage || 'Error al registrar');
+            }
+        } catch (error) {
+            Alert.alert('Error', 'Error al registrar. Intenta nuevamente');
+        } finally {
+            setIsLoading(false);
         }
     };
 

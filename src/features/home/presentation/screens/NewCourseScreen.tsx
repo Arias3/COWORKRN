@@ -12,16 +12,56 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
+import RobleApiDataSource from '../../../../core/data/datasources/RobleApiDataSource';
+import UsuarioRepositoryRobleImpl from '../../../auth/data/repositories/UsuarioRepositoryRobleImpl';
 import { Usuario } from '../../../auth/domain/entities/UserEntity';
+import { UsuarioUseCase } from '../../../auth/domain/use_case/UsuarioUseCase';
+import { useAuth } from '../../../auth/presentation/context/authContext';
+import { CursoRepositoryRobleImpl } from '../../data/repositories/CursoRepositoryRobleImpl';
+import { InscripcionRepositoryRobleImpl } from '../../data/repositories/InscripcionRepositoryRobleImpl';
+import { CursoUseCase } from '../../domain/usecases/CursoUseCase';
 import { NewCourseController } from '../controllers/NewCourseController';
 
 const { width } = Dimensions.get('window');
 
 export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const [controller] = useState(() => {
-    return DependencyInjection.resolve<NewCourseController>('NewCourseController');
-  });
+  const { controller: authController } = useAuth();
+
+  const [controller, setController] = useState<NewCourseController | null>(null);
+
+  // Initialize controller
+  useEffect(() => {
+    const initController = async () => {
+      try {
+        // Importar instancia de DI para obtener el datasource
+        const di = (await import('../../../../core/di/DependencyInjection')).default;
+        const dataSource = di.resolve('RobleApiDataSource') as RobleApiDataSource;
+
+        // Initialize repositories con datasource
+        const cursoRepository = new CursoRepositoryRobleImpl(dataSource);
+        const inscripcionRepository = new InscripcionRepositoryRobleImpl(dataSource);
+        const cursoUseCase = new CursoUseCase(cursoRepository, inscripcionRepository);
+
+        const usuarioRepository = new UsuarioRepositoryRobleImpl();
+        const usuarioUseCase = new UsuarioUseCase(usuarioRepository);
+
+        // Create controller with authController from context
+        const ctrl = new NewCourseController(cursoUseCase, authController, usuarioUseCase);
+        setController(ctrl);
+
+        console.log('✅ NewCourseController initialized successfully');
+
+        // Load initial data
+        await ctrl.init();
+      } catch (error) {
+        console.error('❌ Error initializing NewCourseController:', error);
+      }
+    };
+
+    if (authController) {
+      initController();
+    }
+  }, [authController]);
 
   const [nombreCurso, setNombreCurso] = useState('');
   const [descripcion, setDescripcion] = useState('');
@@ -36,16 +76,18 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
   const [showSuccessModal, setShowSuccessModal] = useState(false);
 
   useEffect(() => {
-    // Subscribe to controller updates
+    if (!controller) return;
+
+    // Subscribe to controller updates - only for lists and loading states
     const unsubscribe = controller.subscribe(() => {
-      setNombreCurso(controller.nombreCurso);
-      setDescripcion(controller.descripcion);
-      setCodigoRegistro(controller.codigoRegistro);
-      setSelectedCategorias([...controller.selectedCategorias]);
+      // Only update if codigoRegistro changed from controller (generated code)
+      if (controller.codigoRegistro !== codigoRegistro && controller.codigoRegistro.length > 0) {
+        setCodigoRegistro(controller.codigoRegistro);
+      }
       setAvailableCategorias([...controller.categorias]);
+      setSelectedCategorias([...controller.selectedCategorias]);
       setEstudiantesSeleccionados([...controller.estudiantesSeleccionados]);
       setEstudiantesDisponibles([...controller.estudiantesDisponibles]);
-      setSearchQuery(controller.searchQuery);
       setIsLoading(controller.isLoading);
       setIsLoadingStudents(controller.isLoadingStudents);
     });
@@ -53,10 +95,12 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
     // Initial load
     controller.cargarEstudiantes();
 
-    return () => unsubscribe();
+    return unsubscribe;
   }, [controller]);
 
   const handleCreateCourse = async () => {
+    if (!controller) return;
+
     const success = await controller.crearCurso(
       (message) => {
         setShowSuccessModal(true);
@@ -68,19 +112,24 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
   };
 
   const handleToggleCategoria = (categoria: string) => {
+    if (!controller) return;
     controller.toggleCategoria(categoria);
   };
 
   const handleAddStudent = (student: Usuario) => {
+    if (!controller) return;
     controller.agregarEstudiante(student);
   };
 
   const handleRemoveStudent = (student: Usuario) => {
+    if (!controller) return;
     controller.eliminarEstudiante(student);
   };
 
   const handleGenerateCode = () => {
-    controller.generarCodigoAleatorio();
+    if (!controller) return;
+    const codigo = controller.generarCodigoAleatorio();
+    setCodigoRegistro(codigo);
   };
 
   const renderCategoriaChip = (categoria: string) => {
@@ -137,6 +186,16 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
     </View>
   );
 
+  // Show loading while controller initializes
+  if (!controller) {
+    return (
+      <View style={[styles.container, { justifyContent: 'center', alignItems: 'center' }]}>
+        <ActivityIndicator size="large" color="#2196F3" />
+        <Text style={{ marginTop: 16, color: '#757575' }}>Iniciando...</Text>
+      </View>
+    );
+  }
+
   return (
     <View style={styles.container}>
       {/* Header */}
@@ -179,7 +238,10 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
               style={styles.input}
               placeholder="Ej: Curso de Flutter Avanzado"
               value={nombreCurso}
-              onChangeText={(text) => controller.nombreCurso = text}
+              onChangeText={(text) => {
+                setNombreCurso(text);
+                if (controller) controller.nombreCurso = text;
+              }}
             />
           </View>
 
@@ -193,7 +255,10 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
               style={[styles.input, styles.textArea]}
               placeholder="Describe de qué trata tu curso..."
               value={descripcion}
-              onChangeText={(text) => controller.descripcion = text}
+              onChangeText={(text) => {
+                setDescripcion(text);
+                if (controller) controller.descripcion = text;
+              }}
               multiline
               numberOfLines={4}
               textAlignVertical="top"
@@ -216,7 +281,11 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
                   style={[styles.input, styles.codeInput]}
                   placeholder="Ej: PROG001, FLU2024"
                   value={codigoRegistro}
-                  onChangeText={(text) => controller.codigoRegistro = text.toUpperCase()}
+                  onChangeText={(text) => {
+                    const upperText = text.toUpperCase();
+                    setCodigoRegistro(upperText);
+                    if (controller) controller.codigoRegistro = upperText;
+                  }}
                   autoCapitalize="characters"
                 />
                 <TouchableOpacity onPress={handleGenerateCode} style={styles.generateButton}>
@@ -264,7 +333,10 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
                 style={styles.searchInput}
                 placeholder="Buscar estudiante por nombre o email..."
                 value={searchQuery}
-                onChangeText={(text) => controller.searchQuery = text}
+                onChangeText={(text) => {
+                  setSearchQuery(text);
+                  if (controller) controller.searchQuery = text;
+                }}
               />
               <TouchableOpacity
                 onPress={() => controller.cargarEstudiantes()}
@@ -297,7 +369,7 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
                   renderItem={renderSelectedStudent}
                   keyExtractor={(item) => (item.id || 0).toString()}
                   style={styles.studentsList}
-                  scrollEnabled={false}
+                  nestedScrollEnabled
                 />
               </View>
             ) : (
@@ -328,7 +400,7 @@ export const NewCourseScreen: React.FC<{ navigation: any }> = ({ navigation }) =
                   renderItem={renderAvailableStudent}
                   keyExtractor={(item) => (item.id || 0).toString()}
                   style={styles.availableStudentsList}
-                  scrollEnabled={false}
+                  nestedScrollEnabled
                 />
               </View>
             ) : (

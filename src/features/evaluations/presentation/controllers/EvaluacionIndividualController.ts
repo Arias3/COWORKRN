@@ -300,6 +300,311 @@ export class EvaluacionIndividualController {
     this.limpiarCalificacionesTemporales();
     this.notify();
   }
+
+  // ===================================================================
+  // MÉTODOS ADICIONALES (de Flutter)
+  // ===================================================================
+
+  /**
+   * Verifica si un evaluador puede evaluar a un evaluado en un periodo específico
+   * Incluye validación de auto-evaluación según configuración del periodo
+   */
+  async puedeEvaluar(
+    evaluadorId: string,
+    evaluadoId: string,
+    evaluacionPeriodoId: string
+  ): Promise<boolean> {
+    try {
+      console.log('🔍 [EVAL-CONTROLLER] Verificando si puede evaluar...');
+      console.log(`   - Evaluador: ${evaluadorId}`);
+      console.log(`   - Evaluado: ${evaluadoId}`);
+      console.log(`   - Periodo: ${evaluacionPeriodoId}`);
+
+      // Verificar si el repository tiene este método
+      if (typeof (this.repository as any).puedeEvaluar === 'function') {
+        return await (this.repository as any).puedeEvaluar(
+          evaluadorId,
+          evaluadoId,
+          evaluacionPeriodoId
+        );
+      }
+
+      // Fallback: verificar básicamente
+      // No permitir auto-evaluación por defecto (esto debería venir del periodo)
+      if (evaluadorId === evaluadoId) {
+        console.log('⚠️ [EVAL-CONTROLLER] Auto-evaluación no permitida por defecto');
+        return false;
+      }
+
+      // Verificar si ya existe evaluación completada
+      const evaluacionExistente = await this.repository.getEvaluacionEspecifica(
+        evaluacionPeriodoId,
+        evaluadorId,
+        evaluadoId
+      );
+
+      if (evaluacionExistente && evaluacionExistente.completada) {
+        console.log('⚠️ [EVAL-CONTROLLER] Ya existe evaluación completada');
+        return false;
+      }
+
+      console.log('✅ [EVAL-CONTROLLER] Puede evaluar');
+      return true;
+    } catch (e) {
+      console.error('❌ Error verificando si puede evaluar:', e);
+      return false;
+    }
+  }
+
+  /**
+   * Obtiene las evaluaciones realizadas por un evaluador
+   */
+  async getEvaluacionesRealizadas(
+    evaluadorId: string,
+    evaluacionPeriodoId?: string
+  ): Promise<EvaluacionIndividual[]> {
+    try {
+      const evaluaciones = await this.repository.getEvaluacionesPorEvaluador(evaluadorId);
+
+      if (evaluacionPeriodoId) {
+        return evaluaciones.filter(e => e.evaluacionPeriodoId === evaluacionPeriodoId);
+      }
+
+      return evaluaciones;
+    } catch (e) {
+      console.error('Error obteniendo evaluaciones realizadas:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Obtiene las evaluaciones recibidas por un evaluado
+   */
+  async getEvaluacionesRecibidas(
+    evaluadoId: string,
+    evaluacionPeriodoId?: string
+  ): Promise<EvaluacionIndividual[]> {
+    try {
+      const evaluaciones = await this.repository.getEvaluacionesPorEvaluado(evaluadoId);
+
+      if (evaluacionPeriodoId) {
+        return evaluaciones.filter(e => e.evaluacionPeriodoId === evaluacionPeriodoId);
+      }
+
+      return evaluaciones;
+    } catch (e) {
+      console.error('Error obteniendo evaluaciones recibidas:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Obtiene las estadísticas generales de evaluaciones para un periodo
+   */
+  async getEstadisticasEvaluaciones(
+    evaluacionPeriodoId: string
+  ): Promise<Record<string, any> | null> {
+    try {
+      // Verificar si el repository tiene este método
+      if (typeof (this.repository as any).getEstadisticasEvaluaciones === 'function') {
+        return await (this.repository as any).getEstadisticasEvaluaciones(evaluacionPeriodoId);
+      }
+
+      // Fallback: calcular estadísticas básicas
+      const evaluaciones = await this.repository.getEvaluacionesPorPeriodo(evaluacionPeriodoId);
+
+      const completadas = evaluaciones.filter(e => e.completada).length;
+      const pendientes = evaluaciones.length - completadas;
+
+      // Calcular promedios generales
+      let sumaTotal = 0;
+      let contadorTotal = 0;
+
+      evaluaciones.forEach(e => {
+        if (e.completada && e.calificaciones) {
+          Object.values(e.calificaciones).forEach(cal => {
+            sumaTotal += cal;
+            contadorTotal++;
+          });
+        }
+      });
+
+      const promedioGeneral = contadorTotal > 0 ? sumaTotal / contadorTotal : 0;
+
+      return {
+        total: evaluaciones.length,
+        completadas,
+        pendientes,
+        promedioGeneral: parseFloat(promedioGeneral.toFixed(2)),
+      };
+    } catch (e) {
+      console.error('Error obteniendo estadísticas:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Obtiene el promedio de evaluaciones de un usuario
+   */
+  async getPromedioUsuario(
+    evaluadoId: string,
+    evaluacionPeriodoId: string
+  ): Promise<Record<string, number> | null> {
+    try {
+      return await this.repository.getPromedioEvaluacionesPorUsuario(
+        evaluadoId,
+        evaluacionPeriodoId
+      );
+    } catch (e) {
+      console.error('Error obteniendo promedio del usuario:', e);
+      return null;
+    }
+  }
+
+  /**
+   * Obtiene la lista de usuarios que un evaluador aún no ha evaluado
+   */
+  async getUsuariosPendientesPorEvaluar(
+    evaluadorId: string,
+    evaluacionPeriodoId: string,
+    posiblesEvaluados: string[]
+  ): Promise<string[]> {
+    try {
+      // Obtener evaluaciones realizadas por el evaluador en este periodo
+      const evaluacionesRealizadas = await this.getEvaluacionesRealizadas(
+        evaluadorId,
+        evaluacionPeriodoId
+      );
+
+      // Filtrar solo las completadas
+      const evaluadosCompletados = evaluacionesRealizadas
+        .filter(e => e.completada)
+        .map(e => e.evaluadoId);
+
+      // Retornar los que no han sido evaluados
+      return posiblesEvaluados.filter(id => !evaluadosCompletados.includes(id));
+    } catch (e) {
+      console.error('Error obteniendo usuarios pendientes:', e);
+      return [];
+    }
+  }
+
+  /**
+   * Genera evaluaciones automáticamente para un periodo y equipo
+   */
+  async generarEvaluacionesParaPeriodo(params: {
+    evaluacionPeriodoId: string;
+    equipoId: string;
+    miembrosEquipo: string[];
+  }): Promise<EvaluacionIndividual[]> {
+    try {
+      this._isLoading = true;
+      this.notify();
+
+      console.log('🔄 [EVAL-CONTROLLER] Iniciando generación de evaluaciones');
+      console.log(`   - Periodo: ${params.evaluacionPeriodoId}`);
+      console.log(`   - Equipo: ${params.equipoId}`);
+      console.log(`   - Miembros: ${params.miembrosEquipo.length}`);
+
+      const evaluacionesGeneradas: EvaluacionIndividual[] = [];
+
+      // Generar evaluaciones para cada par de evaluador-evaluado
+      for (const evaluadorId of params.miembrosEquipo) {
+        for (const evaluadoId of params.miembrosEquipo) {
+          // Verificar si puede evaluar (esto incluye auto-evaluación)
+          const puede = await this.puedeEvaluar(
+            evaluadorId,
+            evaluadoId,
+            params.evaluacionPeriodoId
+          );
+
+          if (puede) {
+            // Verificar si ya existe
+            const existe = await this.repository.getEvaluacionEspecifica(
+              params.evaluacionPeriodoId,
+              evaluadorId,
+              evaluadoId
+            );
+
+            if (!existe) {
+              // Crear evaluación en blanco
+              const nuevaEvaluacion = new EvaluacionIndividual({
+                id: '', // Será generado por el repository
+                evaluacionPeriodoId: params.evaluacionPeriodoId,
+                evaluadorId,
+                evaluadoId,
+                equipoId: params.equipoId,
+                calificaciones: {},
+                completada: false,
+                fechaCreacion: new Date(),
+              });
+
+              const creada = await this.repository.crearEvaluacion(nuevaEvaluacion);
+              evaluacionesGeneradas.push(creada);
+            }
+          }
+        }
+      }
+
+      // Actualizar cache local
+      if (evaluacionesGeneradas.length > 0) {
+        const evaluacionesExistentes =
+          this._evaluacionesPorPeriodo.get(params.evaluacionPeriodoId) || [];
+        this._evaluacionesPorPeriodo.set(params.evaluacionPeriodoId, [
+          ...evaluacionesExistentes,
+          ...evaluacionesGeneradas,
+        ]);
+      }
+
+      console.log(`✅ [EVAL-CONTROLLER] Generadas ${evaluacionesGeneradas.length} evaluaciones`);
+      return evaluacionesGeneradas;
+    } catch (e) {
+      console.error('❌ Error generando evaluaciones:', e);
+      return [];
+    } finally {
+      this._isLoading = false;
+      this.notify();
+    }
+  }
+
+  /**
+   * Limpia todo el cache del controller
+   */
+  limpiarCache(): void {
+    this._evaluacionesPorPeriodo.clear();
+    this._evaluacionesPorEvaluador.clear();
+    this._evaluacionesPorEvaluado.clear();
+    this._evaluacionActual = null;
+    this.limpiarCalificacionesTemporales();
+    this.notify();
+  }
+
+  /**
+   * Getters de conveniencia para acceso local
+   */
+  getEvaluacionesPorPeriodoLocal(evaluacionPeriodoId: string): EvaluacionIndividual[] {
+    return this._evaluacionesPorPeriodo.get(evaluacionPeriodoId) || [];
+  }
+
+  getEvaluacionesPorEvaluadorLocal(evaluadorId: string): EvaluacionIndividual[] {
+    return this._evaluacionesPorEvaluador.get(evaluadorId) || [];
+  }
+
+  getEvaluacionesPorEvaluadoLocal(evaluadoId: string): EvaluacionIndividual[] {
+    return this._evaluacionesPorEvaluado.get(evaluadoId) || [];
+  }
+
+  getCalificacionTemporal(criterio: string): number | undefined {
+    return this._calificacionesTemporales[criterio];
+  }
+
+  get tieneCalificacionesTemporales(): boolean {
+    return Object.keys(this._calificacionesTemporales).length > 0;
+  }
+
+  get puedeCompletar(): boolean {
+    return this.tieneCalificacionesTemporales;
+  }
 }
 
 export default EvaluacionIndividualController;

@@ -9,6 +9,7 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
+import { useAuth } from '../../../auth/presentation/context/authContext';
 import CursoDomain from '../../domain/entities/CursoEntity';
 import { HomeController } from '../controllers/HomeController';
 
@@ -18,7 +19,9 @@ import { HomeController } from '../controllers/HomeController';
  * Main screen showing enrolled and taught courses.
  * Maintains UI fidelity with Flutter implementation.
  */
-export const HomeScreen: React.FC = () => {
+export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
+  const { user, logout: authLogout } = useAuth();
+
   const [controller] = useState(() => {
     // Initialize controller (would come from DI in production)
     // For now, this is a placeholder
@@ -42,16 +45,15 @@ export const HomeScreen: React.FC = () => {
   const onRefresh = async () => {
     setRefreshing(true);
     // await controller.refreshData();
+    setRefreshing(false);
   };
 
   const handleCreateCourse = () => {
-    // Navigate to new course screen
-    Alert.alert('Crear Curso', 'Navegar a pantalla de nuevo curso');
+    navigation.navigate('NewCourse');
   };
 
   const handleEnrollCourse = () => {
-    // Navigate to enroll course screen
-    Alert.alert('Inscribirse', 'Navegar a pantalla de inscripción');
+    navigation.navigate('EnrollCourse');
   };
 
   const handleLogout = () => {
@@ -63,12 +65,22 @@ export const HomeScreen: React.FC = () => {
         {
           text: 'Salir',
           style: 'destructive',
-          onPress: () => {
-            // Perform logout
+          onPress: async () => {
+            await authLogout();
           },
         },
       ]
     );
+  };
+
+  const handleCoursePress = (curso: CursoDomain, isDictado: boolean) => {
+    if (isDictado) {
+      // Navigate to course detail screen
+      navigation.navigate('EstudianteCursoDetalle', { curso });
+    } else {
+      // Navigate to student course view
+      navigation.navigate('EstudianteCursoDetalle', { curso });
+    }
   };
 
   const renderCourseCard = (curso: CursoDomain, isDictado: boolean) => {
@@ -76,7 +88,7 @@ export const HomeScreen: React.FC = () => {
       <TouchableOpacity
         key={curso.id}
         style={styles.courseCard}
-        onPress={() => Alert.alert('Curso', `Seleccionaste: ${curso.nombre}`)}
+        onPress={() => handleCoursePress(curso, isDictado)}
       >
         <View style={styles.courseHeader}>
           <View style={styles.courseIcon}>
@@ -135,11 +147,13 @@ export const HomeScreen: React.FC = () => {
       <View style={styles.header}>
         <View style={styles.userInfo}>
           <View style={styles.avatar}>
-            <Text style={styles.avatarText}>U</Text>
+            <Text style={styles.avatarText}>
+              {user?.email ? user.email.charAt(0).toUpperCase() : 'U'}
+            </Text>
           </View>
           <View>
             <Text style={styles.greeting}>¡Hola!</Text>
-            <Text style={styles.userName}>Usuario</Text>
+            <Text style={styles.userName}>{user?.email || 'Usuario'}</Text>
           </View>
         </View>
         <View style={styles.headerActions}>

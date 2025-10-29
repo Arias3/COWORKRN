@@ -1,4 +1,4 @@
-import { RobleAuthRegisterUseCase } from '../../domain/usecases/RobleAuthRegisterUseCase';
+import { RobleAuthRegisterUseCase } from '../../domain/use_case/RobleAuthRegisterUseCase';
 import { RobleAuthLoginController } from './RobleAuthLoginController';
 
 /**

@@ -10,10 +10,18 @@ import {
   TouchableOpacity,
   View,
 } from 'react-native';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
+import RobleApiDataSource from '../../../../core/data/datasources/RobleApiDataSource';
+import { ActivityRepositoryRobleImpl } from '../../../activities/data/repositories/ActivityRepositoryRobleImpl';
 import { Activity } from '../../../activities/domain/entities/Activity';
 import { ActivityController } from '../../../activities/presentation/controllers/ActivityController';
+import { UsuarioRepositoryRobleImpl } from '../../../auth/data/repositories/UsuarioRepositoryRobleImpl';
+import { useAuth } from '../../../auth/presentation/context/authContext';
+import { CategoriaEquipoRepositoryRobleImpl } from '../../../categories/data/repositories/CategoriaEquipoRepositoryRobleImpl';
+import { EquipoActividadRepositoryRobleImpl } from '../../../categories/data/repositories/EquipoActividadRepositoryRobleImpl';
+import { EquipoRepositoryRobleImpl } from '../../../categories/data/repositories/EquipoRepositoryRobleImpl';
 import { Equipo } from '../../../categories/domain/entities/EquipoEntity';
+import { CategoriaEquipoUseCase } from '../../../categories/domain/usecases/CategoriaEquipoUseCase';
+import { EquipoActividadUseCase } from '../../../categories/domain/usecases/EquipoActividadUseCase';
 import { CategoriaEquipoController } from '../../../categories/presentation/controllers/CategoriaEquipoController';
 import CursoDomain from '../../domain/entities/CursoEntity';
 
@@ -24,13 +32,11 @@ interface Props {
 
 export const EstudianteCursoDetalleScreen: React.FC<Props> = ({ navigation, route }) => {
   const { curso } = route.params;
+  const { controller: authController } = useAuth();
 
-  const [activityController] = useState(() =>
-    DependencyInjection.resolve<ActivityController>('ActivityController')
-  );
-  const [categoriaController] = useState(() =>
-    DependencyInjection.resolve<CategoriaEquipoController>('CategoriaEquipoController')
-  );
+  const [activityController, setActivityController] = useState<ActivityController | null>(null);
+  const [categoriaController, setCategoriaController] = useState<CategoriaEquipoController | null>(null);
+  const [isInitializing, setIsInitializing] = useState(true);
 
   const [selectedTab, setSelectedTab] = useState(0);
   const [isLoading, setIsLoading] = useState(true);
@@ -40,11 +46,82 @@ export const EstudianteCursoDetalleScreen: React.FC<Props> = ({ navigation, rout
   const [todosLosEquipos, setTodosLosEquipos] = useState<Equipo[]>([]);
   const [misEquipos, setMisEquipos] = useState<Equipo[]>([]);
 
+  // Initialize controllers
   useEffect(() => {
-    loadData();
-  }, []);
+    const initializeControllers = async () => {
+      try {
+        console.log('🔧 Initializing EstudianteCursoDetalleScreen controllers...');
+
+        if (!authController) {
+          console.error('❌ AuthController not available');
+          return;
+        }
+
+        const currentUserId = authController.currentUser?.id;
+        if (!currentUserId) {
+          console.error('❌ Current user ID not available');
+          Alert.alert('Error', 'No se pudo obtener la información del usuario');
+          return;
+        }
+
+        // Create datasource
+        const dataSource = new RobleApiDataSource();
+
+        // Create repositories
+        const activityRepository = new ActivityRepositoryRobleImpl(dataSource);
+        const categoriaRepository = new CategoriaEquipoRepositoryRobleImpl(dataSource);
+        const equipoRepository = new EquipoRepositoryRobleImpl(dataSource);
+        const equipoActividadRepository = new EquipoActividadRepositoryRobleImpl(dataSource, equipoRepository);
+        const usuarioRepository = new UsuarioRepositoryRobleImpl();
+
+        // Create use cases
+        const categoriaUseCase = new CategoriaEquipoUseCase(
+          categoriaRepository,
+          equipoRepository,
+          usuarioRepository
+        );
+        const equipoActividadUseCase = new EquipoActividadUseCase(equipoActividadRepository);
+
+        // Create controllers
+        const activityCtrl = new ActivityController(
+          activityRepository,
+          categoriaUseCase,
+          equipoActividadUseCase
+        );
+
+        const categoriaCtrl = new CategoriaEquipoController(
+          categoriaRepository,
+          equipoRepository,
+          currentUserId
+        );
+
+        setActivityController(activityCtrl);
+        setCategoriaController(categoriaCtrl);
+
+        console.log('✅ Controllers initialized successfully');
+      } catch (error) {
+        console.error('❌ Error initializing controllers:', error);
+        Alert.alert('Error', 'No se pudieron inicializar los controladores');
+      } finally {
+        setIsInitializing(false);
+      }
+    };
+
+    initializeControllers();
+  }, [authController]);
+
+  useEffect(() => {
+    if (!isInitializing && activityController && categoriaController) {
+      loadData();
+    }
+  }, [isInitializing, activityController, categoriaController]);
 
   const loadData = async () => {
+    if (!activityController || !categoriaController) {
+      console.warn('⚠️ Controllers not initialized yet');
+      return;
+    }
+
     try {
       setIsLoading(true);
 
@@ -223,41 +300,50 @@ export const EstudianteCursoDetalleScreen: React.FC<Props> = ({ navigation, rout
 
   return (
     <View style={styles.container}>
-      {/* Header */}
-      <View style={styles.header}>
-        <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
-          <Text style={styles.backIcon}>←</Text>
-        </TouchableOpacity>
-        <View style={styles.headerContent}>
-          <Text style={styles.headerTitle}>{curso.nombre}</Text>
-          <Text style={styles.headerSubtitle}>Vista de estudiante</Text>
+      {isInitializing ? (
+        <View style={styles.loadingContainer}>
+          <ActivityIndicator size="large" color="#2196F3" />
+          <Text style={styles.loadingText}>Inicializando...</Text>
         </View>
-        <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
-          <Text style={styles.refreshIcon}>🔄</Text>
-        </TouchableOpacity>
-      </View>
+      ) : (
+        <>
+          {/* Header */}
+          <View style={styles.header}>
+            <TouchableOpacity onPress={() => navigation.goBack()} style={styles.backButton}>
+              <Text style={styles.backIcon}>←</Text>
+            </TouchableOpacity>
+            <View style={styles.headerContent}>
+              <Text style={styles.headerTitle}>{curso.nombre}</Text>
+              <Text style={styles.headerSubtitle}>Vista de estudiante</Text>
+            </View>
+            <TouchableOpacity onPress={handleRefresh} style={styles.refreshButton}>
+              <Text style={styles.refreshIcon}>🔄</Text>
+            </TouchableOpacity>
+          </View>
 
-      {/* Tab Bar */}
-      <View style={styles.tabBar}>
-        {tabs.map((tab, index) => (
-          <TouchableOpacity
-            key={index}
-            onPress={() => setSelectedTab(index)}
-            style={[styles.tab, selectedTab === index && styles.tabActive]}
-          >
-            <Text style={styles.tabIcon}>{tab.icon}</Text>
-            <Text
-              style={[styles.tabLabel, selectedTab === index && styles.tabLabelActive]}
-              numberOfLines={1}
-            >
-              {tab.label}
-            </Text>
-          </TouchableOpacity>
-        ))}
-      </View>
+          {/* Tab Bar */}
+          <View style={styles.tabBar}>
+            {tabs.map((tab, index) => (
+              <TouchableOpacity
+                key={index}
+                onPress={() => setSelectedTab(index)}
+                style={[styles.tab, selectedTab === index && styles.tabActive]}
+              >
+                <Text style={styles.tabIcon}>{tab.icon}</Text>
+                <Text
+                  style={[styles.tabLabel, selectedTab === index && styles.tabLabelActive]}
+                  numberOfLines={1}
+                >
+                  {tab.label}
+                </Text>
+              </TouchableOpacity>
+            ))}
+          </View>
 
-      {/* Tab Content */}
-      {renderTabContent()}
+          {/* Tab Content */}
+          {renderTabContent()}
+        </>
+      )}
     </View>
   );
 };
@@ -266,6 +352,17 @@ const styles = StyleSheet.create({
   container: {
     flex: 1,
     backgroundColor: '#F5F5F5',
+  },
+  loadingContainer: {
+    flex: 1,
+    justifyContent: 'center',
+    alignItems: 'center',
+    backgroundColor: '#F5F5F5',
+  },
+  loadingText: {
+    marginTop: 16,
+    fontSize: 16,
+    color: '#757575',
   },
   header: {
     flexDirection: 'row',
@@ -331,17 +428,6 @@ const styles = StyleSheet.create({
   tabLabelActive: {
     opacity: 1,
     fontWeight: 'bold',
-  },
-  loadingContainer: {
-    flex: 1,
-    justifyContent: 'center',
-    alignItems: 'center',
-    padding: 32,
-  },
-  loadingText: {
-    marginTop: 16,
-    fontSize: 16,
-    color: '#666',
   },
   listContent: {
     padding: 16,

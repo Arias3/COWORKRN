@@ -1,16 +1,16 @@
 import AsyncStorage from '@react-native-async-storage/async-storage';
 import RobleConfig from '../../../../core/data/database/RobleConfig';
-import DependencyInjection from '../../../../core/di/DependencyInjection';
 import { RobleAuthLogoutDataSource } from '../../data/datasources/RobleAuthLogoutDataSource';
 import { RobleAuthRefreshTokenDataSource } from '../../data/datasources/RobleAuthRefreshTokenDataSource';
 import { Usuario } from '../../domain/entities/UserEntity';
-import { RobleAuthLoginUseCase } from '../../domain/usecases/RobleAuthLoginUseCase';
-import { UsuarioUseCase } from '../../domain/usecases/UsuarioUseCase';
+import { RobleAuthLoginUseCase } from '../../domain/use_case/RobleAuthLoginUseCase';
+import { UsuarioUseCase } from '../../domain/use_case/UsuarioUseCase';
 
 export class RobleAuthLoginController {
     private useCase: RobleAuthLoginUseCase;
     private refreshDatasource: RobleAuthRefreshTokenDataSource;
     private logoutDatasource: RobleAuthLogoutDataSource;
+    public usuarioUseCase?: UsuarioUseCase; // Made public for injection from AuthContext
 
     public isLoading: boolean = false;
     public errorMessage: string = '';
@@ -21,8 +21,9 @@ export class RobleAuthLoginController {
     private refreshTimer: NodeJS.Timeout | null = null;
     private listeners: Set<() => void> = new Set();
 
-    constructor(useCase: RobleAuthLoginUseCase) {
+    constructor(useCase: RobleAuthLoginUseCase, usuarioUseCase?: UsuarioUseCase) {
         this.useCase = useCase;
+        this.usuarioUseCase = usuarioUseCase;
         this.refreshDatasource = new RobleAuthRefreshTokenDataSource();
         this.logoutDatasource = new RobleAuthLogoutDataSource();
     }
@@ -94,8 +95,12 @@ export class RobleAuthLoginController {
                 const authUserId = userData.id.toString();
                 const emailNormalizado = params.email.toLowerCase().trim();
 
-                // Obtener el UsuarioUseCase desde DI
-                const usuarioUseCase = DependencyInjection.resolve<UsuarioUseCase>('UsuarioUseCase');
+                // Usar usuarioUseCase inyectado
+                if (!this.usuarioUseCase) {
+                    console.error('❌ UsuarioUseCase no está disponible');
+                    throw new Error('UsuarioUseCase not injected');
+                }
+
                 let perfil: Usuario | null = null;
 
                 console.log('🔍 === BÚSQUEDA Y REPARACIÓN DE USUARIO ===');
@@ -104,7 +109,7 @@ export class RobleAuthLoginController {
 
                 try {
                     // 1. Buscar por email
-                    perfil = await usuarioUseCase.getUsuarioByEmail(emailNormalizado);
+                    perfil = await this.usuarioUseCase.getUsuarioByEmail(emailNormalizado);
                     console.log('🔍 Búsqueda por email:', perfil ? 'ENCONTRADO' : 'NO ENCONTRADO');
 
                     if (perfil) {
@@ -139,7 +144,7 @@ export class RobleAuthLoginController {
                         // Reparar rol: si no es profesor, detectar automáticamente por email
                         const rolFinal = (perfil.rol && perfil.rol === 'profesor')
                             ? 'profesor'
-                            : usuarioUseCase.detectarRolPorEmail(emailNormalizado);
+                            : this.usuarioUseCase.detectarRolPorEmail(emailNormalizado);
 
                         if (perfil.rol !== rolFinal) {
                             perfil.rol = rolFinal;
@@ -149,7 +154,7 @@ export class RobleAuthLoginController {
 
                         // Guardar reparaciones
                         if (necesitaReparacion) {
-                            await usuarioUseCase.updateUsuario(perfil);
+                            await this.usuarioUseCase.updateUsuario(perfil);
                             console.log('✅ Usuario actualizado correctamente');
                         }
 
@@ -159,7 +164,7 @@ export class RobleAuthLoginController {
                     } else {
                         // 2. Usuario no existe, crear nuevo
                         console.log('🆕 Usuario no existe, creando nuevo...');
-                        const rolFinal = usuarioUseCase.detectarRolPorEmail(emailNormalizado);
+                        const rolFinal = this.usuarioUseCase.detectarRolPorEmail(emailNormalizado);
                         const nuevoUsuario = new Usuario({
                             nombre: userData.name || 'Usuario',
                             email: emailNormalizado,
@@ -168,7 +173,7 @@ export class RobleAuthLoginController {
                             authUserId: authUserId,
                         });
 
-                        const nuevoId = await usuarioUseCase.createUsuarioFromAuth({
+                        const nuevoId = await this.usuarioUseCase.createUsuarioFromAuth({
                             nombre: nuevoUsuario.nombre,
                             email: nuevoUsuario.email,
                             authUserId: authUserId,
