@@ -5,11 +5,17 @@
  * Handles activity CRUD operations and UI state.
  */
 
+import { CategoriaEquipo } from '../../../categories/domain/entities/CategoriaEquipoEntity';
+import { Equipo } from '../../../categories/domain/entities/EquipoEntity';
+import { CategoriaEquipoUseCase } from '../../../categories/domain/usecases/CategoriaEquipoUseCase';
+import { EquipoActividadUseCase } from '../../../categories/domain/usecases/EquipoActividadUseCase';
 import { Activity } from '../../domain/entities/Activity';
 import { IActivityRepository } from '../../domain/repositories/IActivityRepository';
 
 export class ActivityController {
     private repository: IActivityRepository;
+    private categoriaEquipoUseCase: CategoriaEquipoUseCase;
+    private equipoActividadUseCase: EquipoActividadUseCase;
 
     // UI States
     public activities: Activity[] = [];
@@ -19,10 +25,22 @@ export class ActivityController {
     public currentFilter: 'all' | 'active' | 'pending' | 'overdue' = 'all';
     public selectedCategoryId: number | null = null;
 
+    // Team Assignment States
+    public categorias: CategoriaEquipo[] = [];
+    public equiposDisponibles: Equipo[] = [];
+    public equiposSeleccionados: Set<number> = new Set();
+    public isLoadingTeams: boolean = false;
+
     private listeners: Set<() => void> = new Set();
 
-    constructor(repository: IActivityRepository) {
+    constructor(
+        repository: IActivityRepository,
+        categoriaEquipoUseCase: CategoriaEquipoUseCase,
+        equipoActividadUseCase: EquipoActividadUseCase
+    ) {
         this.repository = repository;
+        this.categoriaEquipoUseCase = categoriaEquipoUseCase;
+        this.equipoActividadUseCase = equipoActividadUseCase;
     }
 
     // ===================================================================
@@ -345,6 +363,246 @@ export class ActivityController {
     public clearError(): void {
         this.error = null;
         this.notifyListeners();
+    }
+
+    // ===================================================================
+    // TEAM ASSIGNMENT METHODS
+    // ===================================================================
+
+    /**
+     * Load categories for a specific course
+     */
+    public async loadCategoriasPorCurso(cursoId: number): Promise<void> {
+        try {
+            console.log(`🔍 [Controller] Cargando categorías del curso ${cursoId}...`);
+            this.isLoadingTeams = true;
+            this.notifyListeners();
+
+            this.categorias = await this.categoriaEquipoUseCase.getCategoriasPorCurso(cursoId);
+
+            this.isLoadingTeams = false;
+            this.notifyListeners();
+
+            console.log(`✅ [Controller] ${this.categorias.length} categorías cargadas`);
+        } catch (e) {
+            this.isLoadingTeams = false;
+            this.notifyListeners();
+            console.error('❌ [Controller] Error cargando categorías:', e);
+        }
+    }
+
+    /**
+     * Load teams for a specific category
+     */
+    public async loadEquiposPorCategoria(categoriaId: number): Promise<void> {
+        try {
+            console.log(`🔍 [Controller] Cargando equipos de categoría ${categoriaId}...`);
+            this.isLoadingTeams = true;
+            this.notifyListeners();
+
+            this.equiposDisponibles = await this.categoriaEquipoUseCase.getEquiposPorCategoria(categoriaId);
+            this.equiposSeleccionados.clear(); // Clear previous selection
+
+            this.isLoadingTeams = false;
+            this.notifyListeners();
+
+            console.log(`✅ [Controller] ${this.equiposDisponibles.length} equipos cargados`);
+        } catch (e) {
+            this.isLoadingTeams = false;
+            this.notifyListeners();
+            console.error('❌ [Controller] Error cargando equipos:', e);
+        }
+    }
+
+    /**
+     * Toggle team selection
+     */
+    public toggleEquipoSelection(equipoId: number): void {
+        console.log(`🔄 [Controller] Toggle equipo ${equipoId}`);
+        console.log(`   Antes: ${Array.from(this.equiposSeleccionados)}`);
+
+        if (this.equiposSeleccionados.has(equipoId)) {
+            this.equiposSeleccionados.delete(equipoId);
+            console.log('   ➖ Removido');
+        } else {
+            this.equiposSeleccionados.add(equipoId);
+            console.log('   ➕ Agregado');
+        }
+
+        console.log(`   Después: ${Array.from(this.equiposSeleccionados)}`);
+        this.notifyListeners();
+    }
+
+    /**
+     * Select all teams
+     */
+    public selectAllTeams(): void {
+        this.equiposSeleccionados.clear();
+        this.equiposDisponibles.forEach(equipo => {
+            if (equipo.id) {
+                this.equiposSeleccionados.add(equipo.id);
+            }
+        });
+        this.notifyListeners();
+        console.log(`🔄 [Controller] Seleccionados todos los equipos: ${Array.from(this.equiposSeleccionados)}`);
+    }
+
+    /**
+     * Select teams that don't have the activity assigned
+     */
+    public async selectTeamsWithoutActivity(activityId: string): Promise<void> {
+        try {
+            console.log(`🔍 [Controller] Seleccionando equipos sin actividad ${activityId}...`);
+
+            const equiposConActividad = await this.getEquiposConActividad(activityId);
+            const equiposConActividadIds = new Set(equiposConActividad);
+
+            this.equiposSeleccionados.clear();
+            this.equiposDisponibles.forEach(equipo => {
+                if (equipo.id && !equiposConActividadIds.has(equipo.id)) {
+                    this.equiposSeleccionados.add(equipo.id);
+                }
+            });
+
+            this.notifyListeners();
+            console.log(`✅ [Controller] ${this.equiposSeleccionados.size} equipos sin actividad seleccionados`);
+        } catch (e) {
+            console.error('❌ [Controller] Error seleccionando equipos sin actividad:', e);
+        }
+    }
+
+    /**
+     * Get teams that have the activity assigned (returns team IDs)
+     */
+    public async getEquiposConActividad(activityId: string): Promise<number[]> {
+        try {
+            console.log(`🔍 [Controller] Buscando equipos con actividad: ${activityId}`);
+
+            const asignaciones = await this.equipoActividadUseCase.getAsignacionesByActividad(activityId);
+            const equiposIds = asignaciones.map(a => a.equipoId);
+
+            console.log(`   Asignaciones encontradas: ${asignaciones.length}`);
+            console.log(`   Equipos con actividad: ${equiposIds}`);
+
+            return equiposIds;
+        } catch (e) {
+            console.error('❌ [Controller] Error obteniendo equipos con actividad:', e);
+            return [];
+        }
+    }
+
+    /**
+     * Check if a team has the activity assigned
+     */
+    public async equipoTieneActividad(equipoId: number, activityId: string): Promise<boolean> {
+        try {
+            const asignacion = await this.equipoActividadUseCase.getAsignacion(equipoId, activityId);
+            return asignacion !== null;
+        } catch (e) {
+            console.error('❌ [Controller] Error verificando actividad del equipo:', e);
+            return false;
+        }
+    }
+
+    /**
+     * Clear team selection
+     */
+    public clearEquiposSelection(): void {
+        this.equiposSeleccionados.clear();
+        this.notifyListeners();
+        console.log('🔄 [Controller] Selección de equipos limpiada');
+    }
+
+    /**
+     * Check if a team is selected
+     */
+    public isEquipoSelected(equipoId: number): boolean {
+        const isSelected = this.equiposSeleccionados.has(equipoId);
+        // Only log for first team to avoid spam
+        if (this.equiposDisponibles.length > 0 && equipoId === this.equiposDisponibles[0].id) {
+            console.log(`🔍 [Controller] isEquipoSelected(${equipoId}): ${isSelected}`);
+            console.log(`   Lista actual: ${Array.from(this.equiposSeleccionados)}`);
+        }
+        return isSelected;
+    }
+
+    /**
+     * Assign activity to selected teams
+     */
+    public async assignActivityToSelectedTeams(
+        activity: Activity,
+        onSuccess: (count: number) => void,
+        onError: (message: string) => void
+    ): Promise<void> {
+        if (this.equiposSeleccionados.size === 0) {
+            onError('Debe seleccionar al menos un equipo');
+            return;
+        }
+
+        try {
+            console.log(`📝 [Controller] Asignando actividad ${activity.id} a ${this.equiposSeleccionados.size} equipos...`);
+            this.isLoading = true;
+            this.notifyListeners();
+
+            const activityId = activity.id?.toString() || '';
+            const equipoIds = Array.from(this.equiposSeleccionados);
+
+            await this.equipoActividadUseCase.asignarActividadAEquipos(
+                activityId,
+                equipoIds,
+                activity.fechaEntrega
+            );
+
+            this.isLoading = false;
+            this.equiposSeleccionados.clear();
+            this.notifyListeners();
+
+            onSuccess(equipoIds.length);
+            console.log(`✅ [Controller] Actividad asignada a ${equipoIds.length} equipos`);
+        } catch (e) {
+            this.isLoading = false;
+            this.notifyListeners();
+            onError('Error al asignar actividad a equipos');
+            console.error('❌ [Controller] Error asignando actividad:', e);
+        }
+    }
+
+    /**
+     * Get activities assigned to a specific team
+     */
+    public async getActividadesAsignadasAEquipo(equipoId: number): Promise<Activity[]> {
+        try {
+            console.log(`🔍 [Controller] Obteniendo actividades del equipo ${equipoId}...`);
+
+            const asignaciones = await this.equipoActividadUseCase.getAsignacionesByEquipo(equipoId);
+
+            if (asignaciones.length === 0) {
+                console.log(`ℹ️ [Controller] No hay actividades asignadas al equipo ${equipoId}`);
+                return [];
+            }
+
+            // Load all activities if not loaded
+            if (this.activities.length === 0) {
+                await this.loadActivities();
+            }
+
+            // Filter activities assigned to this team
+            const actividadesAsignadas: Activity[] = [];
+            for (const asignacion of asignaciones) {
+                const actividad = this.activities.find(
+                    a => a.id?.toString() === asignacion.actividadId
+                );
+                if (actividad) {
+                    actividadesAsignadas.push(actividad);
+                }
+            }
+
+            console.log(`✅ [Controller] ${actividadesAsignadas.length} actividades encontradas para equipo ${equipoId}`);
+            return actividadesAsignadas;
+        } catch (e) {
+            console.error('❌ [Controller] Error obteniendo actividades del equipo:', e);
+            return [];
+        }
     }
 
     // ===================================================================
