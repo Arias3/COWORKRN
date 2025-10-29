@@ -2,15 +2,21 @@ import React, { useEffect, useState } from 'react';
 import {
   ActivityIndicator,
   Alert,
-  RefreshControl,
+  Platform,
   ScrollView,
   StyleSheet,
   Text,
   TouchableOpacity,
-  View,
+  View
 } from 'react-native';
+import RobleApiDataSource from '../../../../core/data/datasources/RobleApiDataSource';
+import UsuarioRepositoryRobleImpl from '../../../auth/data/repositories/UsuarioRepositoryRobleImpl';
+import { UsuarioUseCase } from '../../../auth/domain/use_case/UsuarioUseCase';
 import { useAuth } from '../../../auth/presentation/context/authContext';
+import { CursoRepositoryRobleImpl } from '../../data/repositories/CursoRepositoryRobleImpl';
+import { InscripcionRepositoryRobleImpl } from '../../data/repositories/InscripcionRepositoryRobleImpl';
 import CursoDomain from '../../domain/entities/CursoEntity';
+import { CursoUseCase } from '../../domain/usecases/CursoUseCase';
 import { HomeController } from '../controllers/HomeController';
 
 /**
@@ -20,32 +26,89 @@ import { HomeController } from '../controllers/HomeController';
  * Maintains UI fidelity with Flutter implementation.
  */
 export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
-  const { user, logout: authLogout } = useAuth();
+  const { user, logout: authLogout, controller: authController } = useAuth();
 
-  const [controller] = useState(() => {
-    // Initialize controller (would come from DI in production)
-    // For now, this is a placeholder
-    return null as any as HomeController;
-  });
-
+  const [controller, setController] = useState<HomeController | null>(null);
+  const [dictados, setDictados] = useState<CursoDomain[]>([]);
+  const [inscritos, setInscritos] = useState<CursoDomain[]>([]);
+  const [isLoadingDictados, setIsLoadingDictados] = useState(false);
+  const [isLoadingInscritos, setIsLoadingInscritos] = useState(false);
   const [refreshing, setRefreshing] = useState(false);
   const [selectedTab, setSelectedTab] = useState(0); // 0 = Dictados, 1 = Inscritos
 
+  // Initialize controller
   useEffect(() => {
-    if (controller) {
-      controller.init();
-      const unsubscribe = controller.subscribe(() => {
-        // Force re-render when controller state changes
-        setRefreshing(false);
-      });
-      return unsubscribe;
+    console.log('🏠 Initializing HomeController...');
+    console.log('🏠 Current user:', user);
+    console.log('🏠 Auth controller available:', !!authController);
+
+    if (!user || !authController) {
+      console.log('⚠️ No user or authController available, skipping controller initialization');
+      return;
     }
+
+    const initController = async () => {
+      try {
+        // Importar instancia de DI para obtener el datasource
+        const di = (await import('../../../../core/di/DependencyInjection')).default;
+        const dataSource = di.resolve('RobleApiDataSource') as RobleApiDataSource;
+
+        // Initialize repositories con datasource
+        const cursoRepository = new CursoRepositoryRobleImpl(dataSource);
+        const inscripcionRepository = new InscripcionRepositoryRobleImpl(dataSource);
+        const cursoUseCase = new CursoUseCase(cursoRepository, inscripcionRepository);
+
+        const usuarioRepository = new UsuarioRepositoryRobleImpl(); // No usa datasource en constructor
+        const usuarioUseCase = new UsuarioUseCase(usuarioRepository);
+
+        // Create controller with authController from context
+        const ctrl = new HomeController(cursoUseCase, authController, usuarioUseCase);
+        setController(ctrl);
+
+        console.log('✅ HomeController initialized successfully with authController');
+
+        // Initialize and load data
+        await ctrl.init();
+      } catch (error) {
+        console.error('❌ Error initializing HomeController:', error);
+      }
+    };
+
+    initController();
+  }, [user, authController]);
+
+  // Subscribe to controller changes
+  useEffect(() => {
+    if (!controller) return;
+
+    const unsubscribe = controller.subscribe(() => {
+      console.log('🔄 Controller state updated');
+      setDictados([...controller.dictados]);
+      setInscritos([...controller.inscritos]);
+      setIsLoadingDictados(controller.isLoadingDictados);
+      setIsLoadingInscritos(controller.isLoadingInscritos);
+      setRefreshing(false);
+    });
+
+    // Initial data load
+    loadData();
+
+    return unsubscribe;
   }, [controller]);
+
+  const loadData = async () => {
+    if (!controller || !user?.id) {
+      console.log('⚠️ Cannot load data - controller or user not available');
+      return;
+    }
+
+    console.log('🔄 Loading courses for user ID:', user.id);
+    await controller.refreshData();
+  };
 
   const onRefresh = async () => {
     setRefreshing(true);
-    // await controller.refreshData();
-    setRefreshing(false);
+    await loadData();
   };
 
   const handleCreateCourse = () => {
@@ -56,30 +119,90 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
     navigation.navigate('EnrollCourse');
   };
 
-  const handleLogout = () => {
-    Alert.alert(
-      'Cerrar Sesión',
-      '¿Estás seguro de que deseas cerrar sesión?',
-      [
-        { text: 'Cancelar', style: 'cancel' },
-        {
-          text: 'Salir',
-          style: 'destructive',
-          onPress: async () => {
-            await authLogout();
+  const handleLogout = async () => {
+    console.log('🚪 handleLogout called - Showing confirmation dialog');
+
+    // Use window.confirm for web, Alert.alert for native
+    if (Platform.OS === 'web') {
+      console.log('🚪 Using window.confirm for web');
+      const confirmed = window.confirm('¿Estás seguro de que deseas cerrar sesión?');
+      console.log('🚪 User response:', confirmed ? 'CONFIRMED' : 'CANCELLED');
+
+      if (confirmed) {
+        console.log('🚪 User confirmed logout - Starting logout process...');
+        try {
+          await authLogout();
+          console.log('🚪 authLogout completed successfully');
+        } catch (error) {
+          console.error('🚪 Error during logout:', error);
+        }
+      } else {
+        console.log('🚪 Logout cancelled by user');
+      }
+    } else {
+      // Native platforms
+      Alert.alert(
+        'Cerrar Sesión',
+        '¿Estás seguro de que deseas cerrar sesión?',
+        [
+          {
+            text: 'Cancelar',
+            style: 'cancel',
+            onPress: () => console.log('🚪 Logout cancelled by user')
           },
-        },
-      ]
-    );
+          {
+            text: 'Salir',
+            style: 'destructive',
+            onPress: async () => {
+              console.log('🚪 User confirmed logout - Starting logout process...');
+              try {
+                await authLogout();
+                console.log('🚪 authLogout completed successfully');
+              } catch (error) {
+                console.error('🚪 Error during logout:', error);
+              }
+            },
+          },
+        ]
+      );
+    }
   };
 
   const handleCoursePress = (curso: CursoDomain, isDictado: boolean) => {
     if (isDictado) {
-      // Navigate to course detail screen
-      navigation.navigate('EstudianteCursoDetalle', { curso });
+      // Navigate to teacher view (team management)
+      navigation.navigate('CategoriasEquipos', { curso });
     } else {
-      // Navigate to student course view
+      // Navigate to student view
       navigation.navigate('EstudianteCursoDetalle', { curso });
+    }
+  };
+
+  const handleManageCourse = (curso: CursoDomain) => {
+    // Show options menu for course management
+    if (Platform.OS === 'web') {
+      // For web, show a simple confirmation
+      const action = window.confirm('¿Deseas gestionar los equipos de este curso?');
+      if (action) {
+        navigation.navigate('CategoriasEquipos', { curso });
+      }
+    } else {
+      // For mobile, show alert with options
+      Alert.alert(
+        'Gestionar Curso',
+        'Selecciona una opción:',
+        [
+          {
+            text: 'Gestionar Equipos',
+            onPress: () => navigation.navigate('CategoriasEquipos', { curso }),
+          },
+          {
+            text: 'Editar Curso',
+            onPress: () => navigation.navigate('NewCourse', { curso, isEditing: true }),
+          },
+          { text: 'Cancelar', style: 'cancel' },
+        ]
+      );
     }
   };
 
@@ -102,6 +225,18 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
             </Text>
             <Text style={styles.courseCode}>{curso.codigoRegistro}</Text>
           </View>
+          {isDictado && (
+            <TouchableOpacity
+              style={styles.menuButton}
+              onPress={(e) => {
+                e.stopPropagation();
+                handleManageCourse(curso);
+              }}
+              hitSlop={{ top: 10, bottom: 10, left: 10, right: 10 }}
+            >
+              <Text style={styles.menuButtonText}>⋮</Text>
+            </TouchableOpacity>
+          )}
         </View>
 
         {curso.descripcion && (
@@ -131,11 +266,6 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               {curso.estudiantesNombres?.length || 0} estudiantes
             </Text>
           </View>
-          {isDictado && (
-            <TouchableOpacity style={styles.manageButton}>
-              <Text style={styles.manageButtonText}>Gestionar</Text>
-            </TouchableOpacity>
-          )}
         </View>
       </TouchableOpacity>
     );
@@ -167,17 +297,23 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
               <Text>🔄</Text>
             )}
           </TouchableOpacity>
-          <TouchableOpacity style={styles.iconButton} onPress={handleLogout}>
-            <Text>🚪</Text>
+          <TouchableOpacity
+            style={styles.logoutButton}
+            onPress={() => {
+              console.log('🚪 Logout button pressed');
+              handleLogout();
+            }}
+          >
+            <Text style={styles.logoutIcon}>⎋</Text>
+            <Text style={styles.logoutText}>Salir</Text>
           </TouchableOpacity>
         </View>
       </View>
 
       <ScrollView
-        style={styles.content}
-        refreshControl={
-          <RefreshControl refreshing={refreshing} onRefresh={onRefresh} />
-        }
+        style={styles.scrollView}
+        contentContainerStyle={styles.scrollContent}
+        showsVerticalScrollIndicator={true}
       >
         {/* Welcome Card */}
         <View style={styles.welcomeCard}>
@@ -229,10 +365,10 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
         </View>
 
         {/* Course List */}
-        <View style={styles.courseList}>
-          {selectedTab === 0 ? (
-            // Dictados
-            controller?.isLoadingDictados ? (
+        {selectedTab === 0 ? (
+          // Dictados
+          <View style={styles.courseList}>
+            {controller?.isLoadingDictados ? (
               <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
             ) : controller?.dictados && controller.dictados.length > 0 ? (
               controller.dictados.map((curso) => renderCourseCard(curso, true))
@@ -244,10 +380,12 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                   Crea tu primer curso para comenzar
                 </Text>
               </View>
-            )
-          ) : (
-            // Inscritos
-            controller?.isLoadingInscritos ? (
+            )}
+          </View>
+        ) : (
+          // Inscritos
+          <View style={styles.courseList}>
+            {controller?.isLoadingInscritos ? (
               <ActivityIndicator size="large" color="#007AFF" style={styles.loader} />
             ) : controller?.inscritos && controller.inscritos.length > 0 ? (
               controller.inscritos.map((curso) => renderCourseCard(curso, false))
@@ -259,20 +397,46 @@ export const HomeScreen: React.FC<{ navigation: any }> = ({ navigation }) => {
                   Inscríbete en un curso para comenzar
                 </Text>
               </View>
-            )
-          )}
-        </View>
+            )}
+          </View>
+        )}
       </ScrollView>
 
       {/* Floating Action Buttons */}
       <View style={styles.fabContainer}>
         {selectedTab === 0 ? (
-          <TouchableOpacity style={styles.fab} onPress={handleCreateCourse}>
-            <Text style={styles.fabText}>➕ Crear Curso</Text>
+          <TouchableOpacity
+            style={[
+              styles.fab,
+              {
+                backgroundColor: '#2196F3',
+                ...(Platform.OS === 'web' && {
+                  boxShadow: '0px 8px 16px rgba(33, 150, 243, 0.4)',
+                })
+              }
+            ]}
+            onPress={handleCreateCourse}
+            activeOpacity={0.8}
+          >
+            <Text style={{ fontSize: 20, marginRight: 8 }}>➕</Text>
+            <Text style={styles.fabText}>Crear Curso</Text>
           </TouchableOpacity>
         ) : (
-          <TouchableOpacity style={styles.fab} onPress={handleEnrollCourse}>
-            <Text style={styles.fabText}>📝 Inscribirse</Text>
+          <TouchableOpacity
+            style={[
+              styles.fab,
+              {
+                backgroundColor: '#4CAF50',
+                ...(Platform.OS === 'web' && {
+                  boxShadow: '0px 8px 16px rgba(76, 175, 80, 0.4)',
+                })
+              }
+            ]}
+            onPress={handleEnrollCourse}
+            activeOpacity={0.8}
+          >
+            <Text style={{ fontSize: 20, marginRight: 8 }}>🔍</Text>
+            <Text style={styles.fabText}>Buscar Cursos</Text>
           </TouchableOpacity>
         )}
       </View>
@@ -325,7 +489,7 @@ const styles = StyleSheet.create({
   },
   headerActions: {
     flexDirection: 'row',
-    gap: 8,
+    alignItems: 'center',
   },
   iconButton: {
     width: 40,
@@ -334,12 +498,40 @@ const styles = StyleSheet.create({
     backgroundColor: '#F5F5F5',
     justifyContent: 'center',
     alignItems: 'center',
+    marginLeft: 8,
+  },
+  logoutButton: {
+    flexDirection: 'row',
+    alignItems: 'center',
+    backgroundColor: '#FF5252',
+    paddingHorizontal: 12,
+    paddingVertical: 8,
+    borderRadius: 20,
+    marginLeft: 8,
+  },
+  logoutIcon: {
+    fontSize: 18,
+    color: '#FFFFFF',
+    marginRight: 4,
+  },
+  logoutText: {
+    fontSize: 14,
+    fontWeight: '600',
+    color: '#FFFFFF',
   },
   content: {
     flex: 1,
   },
+  scrollView: {
+    flex: 1,
+  },
+  scrollContent: {
+    padding: 16,
+    paddingBottom: 150,
+    minHeight: '120%',
+  },
   welcomeCard: {
-    margin: 16,
+    marginBottom: 16,
     padding: 24,
     backgroundColor: '#2196F3',
     borderRadius: 20,
@@ -378,8 +570,6 @@ const styles = StyleSheet.create({
   },
   statsRow: {
     flexDirection: 'row',
-    paddingHorizontal: 16,
-    gap: 16,
     marginBottom: 16,
   },
   statCard: {
@@ -388,6 +578,7 @@ const styles = StyleSheet.create({
     padding: 20,
     borderRadius: 15,
     alignItems: 'center',
+    marginHorizontal: 8,
     shadowColor: '#000',
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
@@ -407,7 +598,6 @@ const styles = StyleSheet.create({
   tabBar: {
     flexDirection: 'row',
     backgroundColor: '#FFFFFF',
-    marginHorizontal: 16,
     borderRadius: 15,
     padding: 4,
     marginBottom: 16,
@@ -430,8 +620,7 @@ const styles = StyleSheet.create({
     color: '#FFFFFF',
   },
   courseList: {
-    paddingHorizontal: 16,
-    paddingBottom: 100,
+    paddingBottom: 20,
   },
   courseCard: {
     backgroundColor: '#FFFFFF',
@@ -442,11 +631,12 @@ const styles = StyleSheet.create({
     shadowOffset: { width: 0, height: 2 },
     shadowOpacity: 0.1,
     shadowRadius: 8,
-    elevation: 3,
+    elevation: 2,
   },
   courseHeader: {
     flexDirection: 'row',
     marginBottom: 12,
+    alignItems: 'flex-start',
   },
   courseIcon: {
     width: 50,
@@ -483,7 +673,6 @@ const styles = StyleSheet.create({
   categoriesContainer: {
     flexDirection: 'row',
     flexWrap: 'wrap',
-    gap: 8,
     marginBottom: 12,
   },
   categoryChip: {
@@ -491,6 +680,8 @@ const styles = StyleSheet.create({
     paddingHorizontal: 12,
     paddingVertical: 6,
     borderRadius: 12,
+    marginRight: 8,
+    marginBottom: 8,
   },
   categoryText: {
     fontSize: 12,
@@ -517,16 +708,24 @@ const styles = StyleSheet.create({
     fontSize: 14,
     color: '#757575',
   },
-  manageButton: {
-    backgroundColor: '#2196F3',
-    paddingHorizontal: 16,
-    paddingVertical: 8,
-    borderRadius: 8,
+  menuButton: {
+    width: 36,
+    height: 36,
+    borderRadius: 18,
+    backgroundColor: 'rgba(255, 255, 255, 0.9)',
+    justifyContent: 'center',
+    alignItems: 'center',
+    shadowColor: '#000',
+    shadowOffset: { width: 0, height: 2 },
+    shadowOpacity: 0.1,
+    shadowRadius: 4,
+    elevation: 3,
   },
-  manageButtonText: {
-    fontSize: 14,
-    fontWeight: '600',
-    color: '#FFFFFF',
+  menuButtonText: {
+    fontSize: 24,
+    fontWeight: 'bold',
+    color: '#616161',
+    lineHeight: 24,
   },
   emptyState: {
     alignItems: 'center',
@@ -551,25 +750,28 @@ const styles = StyleSheet.create({
     marginTop: 40,
   },
   fabContainer: {
-    position: 'absolute',
-    bottom: 20,
-    right: 20,
+    position: Platform.OS === 'web' ? 'fixed' as any : 'absolute',
+    bottom: 24,
+    right: 24,
+    zIndex: 9999,
+    elevation: 10,
   },
   fab: {
-    backgroundColor: '#2196F3',
+    flexDirection: 'row',
+    alignItems: 'center',
     paddingHorizontal: 24,
     paddingVertical: 16,
-    borderRadius: 30,
-    shadowColor: '#2196F3',
+    borderRadius: 28,
+    shadowColor: '#000',
     shadowOffset: { width: 0, height: 4 },
     shadowOpacity: 0.3,
     shadowRadius: 8,
-    elevation: 8,
+    elevation: 10,
   },
   fabText: {
+    color: '#FFF',
     fontSize: 16,
     fontWeight: 'bold',
-    color: '#FFFFFF',
   },
 });
 

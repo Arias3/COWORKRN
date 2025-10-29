@@ -242,6 +242,26 @@ export class NewCourseController {
 
             console.log('✅ Curso creado con ID:', cursoId);
 
+            // 🎯 INSCRIBIR AUTOMÁTICAMENTE A LOS ESTUDIANTES SELECCIONADOS
+            if (this.estudiantesSeleccionados.length > 0) {
+                console.log('📚 Inscribiendo estudiantes automáticamente...');
+
+                for (const estudiante of this.estudiantesSeleccionados) {
+                    try {
+                        await this.cursoUseCase.inscribirseEnCurso(
+                            estudiante.id!,
+                            this.codigoRegistro.trim()
+                        );
+                        console.log(`✅ Estudiante ${estudiante.nombre} inscrito exitosamente`);
+                    } catch (error) {
+                        console.error(`❌ Error inscribiendo a ${estudiante.nombre}:`, error);
+                        // Continuamos con los demás estudiantes aunque uno falle
+                    }
+                }
+
+                console.log(`🎉 Proceso de inscripción completado para ${this.estudiantesSeleccionados.length} estudiantes`);
+            }
+
             // Limpiar formulario
             this.nombreCurso = '';
             this.descripcion = '';
